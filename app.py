@@ -17,7 +17,8 @@ from audio_processor import (
     record_live_audio,
     load_audio_file,
     analyze_vocal_acoustics,
-    is_mic_available
+    is_mic_available,
+    test_mic
 )
 from sarvam_client import SarvamSTTClient
 from clinical_engine import ClinicalVoiceEngine
@@ -192,30 +193,13 @@ with st.sidebar:
     )
     
     st.markdown("---")
-    
+
     # 5. Audio Input Channel
     input_mode = st.radio(
         "🎙️ Audio Input Channel",
-        options=["Live Microphone (sounddevice)", "Clinical Benchmark Presets", "Upload Audio File"],
+        options=["Browser Microphone", "Clinical Benchmark Presets", "Upload Audio File"],
         index=0
     )
-    
-    # Hardware Status
-    mic_ok, mic_status = is_mic_available()
-    if mic_ok:
-        device_name = mic_status.split(':')[-1].strip() if ':' in mic_status else mic_status
-        st.markdown(f"""
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: #10B981; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 0.5rem 0.7rem; margin-top: 0.5rem;">
-            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10B981;"></span>
-            <span><b>Mic Connected:</b> {device_name[:24]}</span>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: #F59E0B; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 0.5rem 0.7rem; margin-top: 0.5rem;">
-            <span>⚠️ {mic_status}</span>
-        </div>
-        """, unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("""
@@ -283,35 +267,28 @@ st.markdown(f"""
 col_rec_action, col_rec_info = st.columns([1.3, 0.7])
 
 with col_rec_action:
-    if input_mode == "Live Microphone (sounddevice)":
-        btn_record = st.button(
-            f"🔴 Start {rec_duration}-Second Vocal Recording",
-            use_container_width=True,
-            type="primary"
+    if input_mode == "Browser Microphone":
+        st.markdown("""
+        <div style="font-size: 0.82rem; color: #94A3B8; margin-bottom: 0.4rem;">
+            🎙️ Click <b>Record</b> below, speak the text from the teleprompter, then click <b>Stop</b>.
+            The recording will be analyzed automatically.
+        </div>
+        """, unsafe_allow_html=True)
+
+        browser_audio = st.audio_input(
+            label="🔴 Record Your Voice",
+            key="browser_mic_input",
         )
-        
-        if btn_record:
-            if not mic_ok:
-                st.error(f"Microphone unavailable ({mic_status}). Select 'Clinical Benchmark Presets' in the sidebar to run testing.")
-            else:
-                # Live Recording with Teleprompter Active Feedback
-                live_prompt_holder = st.empty()
-                live_progress = st.progress(0, text=f"🎙️ RECORDING LIVE... Speak the text above now!")
-                
-                # Dynamic visual countdown
-                start_time = time.time()
-                audio_arr, wav_path, err = record_live_audio(duration=float(rec_duration), sample_rate=16000)
-                
-                live_progress.progress(100, text="✅ Recording complete! Running acoustic analysis...")
-                time.sleep(0.3)
-                live_progress.empty()
-                
-                if err:
-                    st.error(err)
-                else:
-                    st.session_state.current_audio_data = audio_arr
-                    st.session_state.current_audio_path = wav_path
-                    st.success(f"✅ {rec_duration}-Second vocal recording analyzed successfully!")
+
+        if browser_audio is not None:
+            # Load the browser-captured audio bytes into librosa
+            audio_bytes = browser_audio.read()
+            import io
+            y_arr, sr_val, temp_wav = load_audio_file(io.BytesIO(audio_bytes), sample_rate=16000)
+            st.session_state.current_audio_data = y_arr
+            st.session_state.current_audio_path = temp_wav
+            actual_dur = len(y_arr) / sr_val
+            st.success(f"✅ {actual_dur:.1f}s vocal recording captured — running acoustic analysis...")
 
     elif input_mode == "Clinical Benchmark Presets":
         preset_names = list(st.session_state.benchmarks.keys())
@@ -335,6 +312,7 @@ with col_rec_action:
                 st.session_state.current_audio_data = y
                 st.session_state.current_audio_path = temp_path
                 st.success(f"Audio file loaded ({len(y)/sr:.1f}s)")
+
 
 with col_rec_info:
     st.markdown(f"""

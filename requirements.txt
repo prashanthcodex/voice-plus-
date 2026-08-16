@@ -1,7 +1,8 @@
-streamlit
-sounddevice
+streamlit>=1.31.0
 numpy
 librosa
 scipy
 plotly
+pandas
+soundfile
 sarvamai

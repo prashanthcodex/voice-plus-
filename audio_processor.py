@@ -34,18 +34,50 @@ MIN_DB_FLOOR = 25.0           # Ambient noise floor baseline
 
 
 def is_mic_available() -> Tuple[bool, str]:
-    """Check if microphone input hardware is accessible."""
+    """Check if microphone input hardware is accessible.
+
+    Returns a tuple (available: bool, message: str) where message provides
+    a human‑readable description of the status or error.
+    """
     if not SOUNDDEVICE_AVAILABLE:
-        return False, "sounddevice library could not initialize audio backend."
+        return False, "sounddevice library is unavailable – ensure the PortAudio backend is installed."
     try:
         devices = sd.query_devices()
         input_devices = [d for d in devices if d.get('max_input_channels', 0) > 0]
         if not input_devices:
-            return False, "No audio input recording devices found."
-        default_in = sd.query_devices(kind='input')
-        return True, f"Found input device: {default_in.get('name', 'Default Microphone')}"
+            return False, "No audio input devices detected – check your OS sound settings and microphone connection."
+        # Use default input device if set, otherwise pick first
+        default_idx = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else None
+        if default_idx is not None and default_idx >= 0:
+            dev = sd.query_devices(default_idx, 'input')
+            return True, f"Default microphone: {dev.get('name', 'Unnamed')}"
+        # Fallback to first input device
+        dev = input_devices[0]
+        return True, f"Found input device: {dev.get('name', 'Unnamed')}"
     except Exception as e:
         return False, f"Audio hardware query error: {str(e)}"
+
+
+def test_mic(duration: float = 2.0, sample_rate: int = 16000) -> Tuple[Optional[str], Optional[str]]:
+    """Record a short 2-second clip to verify the microphone is working.
+
+    Returns (wav_path, error_message). wav_path is None on failure.
+    """
+    available, msg = is_mic_available()
+    if not available:
+        return None, f"Microphone unavailable: {msg}"
+    try:
+        num_frames = int(duration * sample_rate)
+        audio_data = sd.rec(frames=num_frames, samplerate=sample_rate, channels=1, dtype='float32')
+        sd.wait()
+        audio_1d = audio_data.flatten()
+        temp_dir = os.path.join(os.path.expanduser("~"), ".vocalstrong_temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        wav_path = os.path.join(temp_dir, f"mic_test_{int(time.time()*1000)}.wav")
+        sf.write(wav_path, audio_1d, sample_rate, subtype='PCM_16')
+        return wav_path, None
+    except Exception as e:
+        return None, f"Microphone test failed: {str(e)}"
 
 
 def record_live_audio(
@@ -55,12 +87,12 @@ def record_live_audio(
 ) -> Tuple[Optional[np.ndarray], Optional[str], Optional[str]]:
     """
     Capture a raw audio sample from the microphone using sounddevice.
-    
+
     Args:
-        duration: Capture duration in seconds (default 4.0s).
+        duration: Capture duration in seconds.
         sample_rate: Sampling frequency in Hz (default 16000Hz).
         output_path: Optional path to save WAV file.
-        
+
     Returns:
         (audio_array, wav_path, error_message)
     """
@@ -71,7 +103,7 @@ def record_live_audio(
     try:
         num_frames = int(duration * sample_rate)
         logger.info(f"Starting live audio capture: {duration}s at {sample_rate}Hz...")
-        
+
         # Record 1-channel 16kHz float32 audio
         audio_data = sd.rec(
             frames=num_frames,
@@ -80,7 +112,7 @@ def record_live_audio(
             dtype='float32'
         )
         sd.wait()  # Wait for recording completion
-        
+
         # Flatten to 1D array
         audio_1d = audio_data.flatten()
 
