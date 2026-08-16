@@ -1,0 +1,7 @@
+streamlit
+sounddevice
+numpy
+librosa
+scipy
+plotly
+sarvamai
